@@ -1,0 +1,340 @@
+(require 2htdp/image)
+(require 2htdp/universe)
+
+(define SIZE 300)
+(define LINE-SIZE (* .8 SIZE))
+(define OFFSET (* .1 SIZE))
+(define LINE-SPACING (/ LINE-SIZE 3))
+(define LINE-WIDTH (/ LINE-SIZE 70))
+
+
+
+
+(define MTS ;(place-image (square (- SIZE 1) "outline" "black") 0 0
+  (empty-scene SIZE SIZE));)
+
+;Board is a (make-board Number Number (listof Number) Number)
+;Represents the current state of a tic-tac-toe board
+
+(define-struct board (player win-state blocks diff))
+
+#;
+(define (fn-for-board b)
+  (...
+   (board-player b)
+   (board-win-state b)
+   (board-blocks)
+   (board-diff)))
+
+;interp:
+; -player signifies whose turn it is
+; -win-state is 1 if player 1 won, -1 if player 2 won, 2 if there was a tie, and 0 if there is not yet a winner
+; -blocks store the values of each tile on the board
+; 0 1 2
+; 3 4 5
+; 6 7 8
+
+; -diff is difficulty of tic tac toe
+
+;;FOR TESTING
+(define BLOCKS (list 0 0 0 0 0 0 0 0 0))
+(define START (make-board 1 0 BLOCKS 9))
+(define b1 (make-board 1 0 BLOCKS 9))
+(define b2 (make-board 1 0 (list 1 1 1 0 0 0 0 0 0) 9))
+(define b3 (make-board -1 0 (list -1 -1 -1 0 0 0 0 0 0) 9))
+(define b4 (make-board 1 0 (list 0 1 0 0 1 0 0 1 0) 9))
+(define b5 (make-board 1 0 (list 1 0 -1 0 0 0 0 0 0) 9))
+(define b6 (make-board -1 0 (list -1 0 0 0 -1 0 0 0 -1) 9))
+(define b7 (make-board 1 0 (list 1 1 -1 -1 -1 1 1 1 -1) 9))
+(define b8 (make-board -1 0 (list 1 1 -1 0 -1 1 1 1 -1) 9))
+(define b9 (make-board -1 0 (list 1 0 0 0 0 0 0 0 0) 9))
+(define b10 (make-board 1 1 (list 1 1 1 0 0 0 -1 -1 0) 9))
+
+
+;Board Number Number -> Number
+;Returns the value of a specified tile at the position (x, y)
+;This function is used by more than one top-level function
+
+(define (get-block b x y)
+  (list-ref (board-blocks b) (+ (* 3 x) y))
+  )
+
+(check-expect (get-block b5 1 1) 0)
+(check-expect (get-block b2 2 0) 0)
+(check-expect (get-block b7 2 2) -1)
+
+
+;a b is a board
+(define (main b)
+  (big-bang b
+    (on-tick tick)
+    (to-draw render)
+    (on-mouse mouse-handler)
+    (on-key key-handler)
+    )
+  )
+
+
+;top level because multiple functions use this
+;Board -> Number
+;Returns 1 if player 1 wins, returns -1 if player 2 wins, 0 if there is no winner
+
+(check-expect (get-win-state b1) 0)
+(check-expect (get-win-state b2) 1)
+(check-expect (get-win-state b3) -1)
+(check-expect (get-win-state b4) 1)
+(check-expect (get-win-state b5) 0)
+(check-expect (get-win-state b6) -1)
+(check-expect (get-win-state b7) 0)
+
+(define (get-win-state b)
+  (local [
+          (define (get-win-state v k)
+            (cond
+              [(and (= k 3) (not v)) (check-diagonals b)]
+              [(and (= k 3) v) (get-win-state false 0)]
+              [else
+               (if v
+                   (if (= (abs (+ (get-block b k 0) (get-block b k 1) (get-block b k 2))) 3)
+                       (board-player b)
+                       (get-win-state v (add1 k)))
+                   (if (= (abs (+ (get-block b 0 k) (get-block b 1 k) (get-block b 2 k))) 3)
+                       (board-player b)
+                       (get-win-state v (add1 k))))
+               ]
+              )
+            )
+          (define (check-diagonals b)
+            (if (or (= (abs (+ (get-block b 0 0) (get-block b 1 1) (get-block b 2 2))) 3) (= (abs (+ (get-block b 0 2) (get-block b 1 1) (get-block b 2 0))) 3))
+                (board-player b)
+                0
+                ))
+  
+          ]
+    (get-win-state true 0)))
+
+
+;Board -> Board
+;Update a given board
+;top level because its a big bang function
+(check-expect (tick b1) b1)
+(check-expect (tick b7) b7)
+(check-expect (tick b8) (make-board 1 0 (list 1 1 -1 -1 -1 1 1 1 -1) 9))
+(check-expect (tick b9) (make-board 1 0 (list 1 0 0 0 -1 0 0 0 0 ) 9))
+
+(define (tick b)
+  (local
+    [
+     ;Board Number Boolean -> Number
+     ;Find the optimal move in tic-tac-toe
+     (define (minimax b d0)
+       (local
+         [
+          (define (get-valiid b)       
+            (filter (λ (x) (= 0 (list-ref (board-blocks b) x))) (build-list 9 (lambda (x) x)))
+            )
+          ;(listof Number) -> Number
+          ;Finds the index of the maximun value in a list
+          (define (index l)
+            (local
+              [
+               (define ma (if (empty? l) 0 (apply min l)))
+               (define (index n l acc)
+                 (cond
+                   [(empty? l) 0]
+                   [(= (first l) n) acc]
+                   [else (index n (rest l) (add1 acc))]
+                   )
+                 )]
+              [index ma l 0]
+              )
+            )
+          (define (minimax b d m)
+            (local
+              [(define winner (get-win-state b))
+               (define get-valid (get-valiid b))
+               ]
+              (cond
+                [(or (empty? get-valid) (not (= 0 winner)) (= 0 d)) (* (add1 d) (- winner))]
+                [m (apply max (build-list (length get-valid) (λ(x) (minimax (place b (modulo (list-ref get-valid x) 3) (floor (/ (list-ref get-valid x) 3)) 1) (- d 1) false))) )]
+                [else (apply min (build-list (length get-valid) (λ(x) (minimax (place b (modulo (list-ref get-valid x) 3) (floor (/ (list-ref get-valid x) 3)) -1) (- d 1) true))) )]
+                ))
+            )
+          ]
+
+         [
+          if (empty? (get-valiid b))
+             -1
+             (if (= 0 d0)
+                 (list-ref (get-valiid b) (random (length (get-valiid b))))
+                 (list-ref (get-valiid b)
+                           (index
+                            (build-list (length (get-valiid b)) (λ(x) (minimax (place b (modulo (list-ref (get-valiid b) x) 3) (floor (/ (list-ref (get-valiid b) x) 3)) -1) d0 true)))
+                            )))
+             ])
+  
+       )
+     ;Calls minimax at depth 9 if it's the computer's turn
+     (define move     
+       (if (=(board-player b) 1) -2 (minimax b (board-diff b)))
+       )
+     (define p (if (false? move) -1 move))
+     (define x (modulo p 3))
+     (define y (floor (/ p 3)))
+
+     ;Board -> Board
+     ;If it's the computer's turn, moves according to minimax, otherwise returns the same board
+     (define (new-board b)
+       (cond
+         [(and (= p -1) (= (board-win-state b) 0)) (make-board (board-player b) 2 (board-blocks b) (board-diff b))]
+         [(not (= 0 (board-win-state b))) b]
+         [(=(board-player b) 1) b]
+         [else (place b x y -1)]
+        
+         ))
+     ]
+    [new-board b]
+    )
+  )
+
+
+;top level because multiple functions use this
+;Board Number Number Number -> Board
+;Changes the blocks of a board given a board, position, and player
+
+(check-expect (place b1 1 1 -1) (make-board -1 0 (list 0 0 0 0 -1 0 0 0 0) 9))
+(check-expect (place b1 -1 -1 -1) b1)
+(check-expect (place b1 3 1 1) b1)
+(check-expect (place b1 3 -1 -1) b1)
+(check-expect (place b1 -3 1 1) b1)
+(check-expect (place b2 0 0 -1) b2)
+(check-expect (place b2 2 2 1) (make-board -1 1 (list 1 1 1 0 0 0 0 0 1) 9))
+
+(define (place ogb x y c)
+  (local
+    [
+     (define (place b x y c acc b0)
+       (cond
+         
+         [(<= y -1) b]
+         [(<= x -1) b]
+         [(>= y 3) b]
+         [(>= x 3) b]
+         [(not (= 0 (board-win-state ogb))) b]
+         ;[ ogb]
+         [(= (+ (* 3 y) x) acc) (append (reverse b0) (list (if (not (= 0 (first b))) (first b) c)) (rest b))]
+         [(empty? b) b0]
+         [else (place (rest b) x y c (+ 1 acc) (cons (first b) b0))]              
+         )
+       )
+     (define new-board (place (board-blocks ogb) x y c 0 empty))
+     ]
+    [if (equal? (board-blocks ogb) new-board) ogb (make-board (- (board-player ogb)) (get-win-state (make-board (board-player ogb) 0 new-board  (board-diff ogb))) new-board (board-diff ogb))]
+
+    ))
+
+
+;top level because its a big bang function
+;Board Number Number Mouse-event -> Board
+;Converts mouse coordinates into board tiles and calls place on those tiles
+
+(check-expect (mouse-handler b1 (/ SIZE 2) (/ SIZE 2) "button-down") (place b1 1 1 (board-player b1)))
+(check-expect (mouse-handler b1 SIZE SIZE "button-down") b1)
+(check-expect (mouse-handler b1 0 0 "button-down") b1)
+(check-expect (mouse-handler b1 0 0 "button-up") b1)
+(check-expect (mouse-handler b1 (/ SIZE 3) (/ SIZE 3) "button-down") (place b1 0 0 (board-player b1)))
+
+(define (mouse-handler b x y me)
+  (cond
+    [(and (mouse=? me "button-down")(= (board-player b) 1))
+     (place
+      b
+      (floor (/ (- x OFFSET) LINE-SPACING))
+      (floor (/ (- y OFFSET) LINE-SPACING))
+      1
+      )
+     ]
+    [else b]
+    ))
+
+
+
+;top level because its a big bang function
+;Board -> Image
+;Draws a given board
+
+
+(define (render b)
+  (local [
+          ;Boolean Number -> Image
+          ;Draws the grid of a tic-tac-toe board
+          (define (make-line v k)
+            (cond
+              [(and (= k 3) (not v)) MTS]
+              [(and (= k 3) v) (make-line false 1)]
+              [else
+               (place-image
+                (rectangle (if v LINE-SIZE LINE-WIDTH) (if v LINE-WIDTH LINE-SIZE) "solid" "black")
+                (if v (/ SIZE 2) (+ OFFSET (* k LINE-SPACING))) (if v (+ OFFSET (* k LINE-SPACING)) (/ SIZE 2))
+                (make-line v (+ k 1))
+                )
+               ]
+              )
+            )
+          ;Board Number Number Image
+          ;Draws the tiles onto base
+          (define (draw-blocks b x y base)
+            (cond
+              [(and (= 0 x)(= 3 y)) base]
+              [else (place-image
+                     (block->img (get-block b y x))
+                     (+ (* 2.35 OFFSET) (* x LINE-SPACING))
+                     (+ (* 2.35 OFFSET) (* y LINE-SPACING))
+                     
+                     (draw-blocks b (if (= 2 x) 0 (+ 1 x)) (if (= 2 x) (+ 1 y) y) base))]
+              
+              )
+            )
+          ;Number -> Image
+          ;Converts a tile into an image
+          (define (block->img b)
+            (if (= 0 b) (rectangle 0 0 "solid" "white")
+                (if (= b -1)
+                    (text "X" (floor LINE-SPACING) "blue")
+                    (text "O" (floor LINE-SPACING) "red")
+                    )))
+          ;Board Image -> Image
+          ;If there's a winner or the game has ended in a tie, display the result of the game in green
+          (define (display-winner b base-img)
+            (place-image
+             (cond [(= (board-win-state b) 1)
+                    (text "O wins" (floor (/ SIZE 10)) "green")]
+                   [(= (board-win-state b) -1)
+                    (text "X wins" (floor (/ SIZE 10)) "green")]
+                   [(= (board-win-state b) 2)
+                    (text "Tie" (floor (/ SIZE 10)) "green")]
+                   [else
+                    (square 0 "solid" "white")]
+                   ) (/ SIZE 2) (/ SIZE 2) base-img))
+          ]
+    [display-winner b (draw-blocks b 0 0 (make-line true 1))]
+    )
+  
+  )
+;this is top level because it's a big bag function
+;Board MouseEvent -> Board
+;change the difficulty of the cpu based on input
+(check-expect (key-handler b1 "0") (make-board (board-player b1) (board-win-state b1) (board-blocks b1) 0))
+(check-expect (key-handler b2 "2") (make-board (board-player b2) (board-win-state b2) (board-blocks b2) 2))
+(check-expect (key-handler b4 "9") (make-board (board-player b4) (board-win-state b4) (board-blocks b4) 9))
+(check-expect (key-handler b3 "1") b3)
+(define (key-handler b me)
+  (local
+    [(define num (string->number me))]
+    (if (key=? me "r")
+        (main START)
+        (if (or (= -1 (board-player b)) (false? num))
+            b
+            (make-board (board-player b) (board-win-state b) (board-blocks b) num)
+            )))
+  )
